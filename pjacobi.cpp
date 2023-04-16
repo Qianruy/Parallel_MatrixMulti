@@ -138,6 +138,42 @@ vector<vector<double>> distribute_matrix(int n, vector<double> &ori_matrix, MPI_
 
     return local_matrix;
 }
+void gatherToRoot(int n, vector<double> &pro_vec, vector<double> &result_vec, MPI_Comm comm_2d) {
+    int rank_2d, coor_2d[2];
+    // Get grid info in 2D meesh
+    MPI_Comm_rank(comm_2d, &rank_2d);
+    MPI_Cart_coords(comm_2d, rank_2d, 2, &coor_2d[0]);
+
+    // Get p and q, and subsize
+    int p;
+    MPI_Comm_size(comm_2d, &p);
+    int q = (int)sqrt(p);
+    int subSize  = block_division(n, q, coor_2d[0]);
+
+    // Create Column communicator
+    int remain_dims[NDIM] = {true, false};
+    MPI_Comm comm_col;
+    MPI_Cart_sub(comm_2d, remain_dims, &comm_col);
+    
+    // Perform GatherV: all the elements are only on the 1st column
+    if (coor_2d[1] == 0) 
+    {
+        //Prepare parameters
+        int* rcounts = new int[q];
+        int* displs = new int[q];
+        displs[0] = 0;
+        for (int i = 0; i < q ; i++) {
+            rcounts[i] = block_division(n, q, i);
+            if (i > 0) {displs[i] = displs[i - 1] + rcounts[i - 1];}
+        }
+        MPI_Gatherv(&pro_vec[0],subSize, MPI_DOUBLE, &result_vec[0], rcounts, displs, MPI_DOUBLE, 0, comm_col);
+        // free the memory
+        delete[] rcounts, displs;
+    }
+    MPI_Comm_free(&comm_col);
+    return;
+}
+
 
 int main(int argc, char *argv[]) {
     MPI_Status status;
@@ -242,6 +278,13 @@ int main(int argc, char *argv[]) {
                 cout << local_A[i][j] << " ";
             cout << endl;
     #endif
+    // Gatehr vector results to processor 0: 
+    if (world_rank == 0)
+         x = std::vector<double>(n);
+    int sizeX = block_division(n, q,coords[0]);
+    vector<double> curr_x(sizeX, 0.0);
+    
+    gatherToRoot(n, curr_x, x, comm);
 
     // Finalize the MPI environment. No more MPI calls can be made after this
     MPI_Comm_free(&comm);
