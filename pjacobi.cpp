@@ -154,7 +154,7 @@ void gatherToRoot(int n, vector<double> &pro_vec, vector<double> &result_vec, MP
     int remain_dims[NDIM] = {true, false};
     MPI_Comm comm_col;
     MPI_Cart_sub(comm_2d, remain_dims, &comm_col);
-    
+
     // Perform GatherV: all the elements are only on the 1st column
     if (coor_2d[1] == 0) 
     {
@@ -173,7 +173,6 @@ void gatherToRoot(int n, vector<double> &pro_vec, vector<double> &result_vec, MP
     MPI_Comm_free(&comm_col);
     return;
 }
-
 
 int main(int argc, char *argv[]) {
     MPI_Status status;
@@ -204,8 +203,8 @@ int main(int argc, char *argv[]) {
 
     // Returns the rank of the process with the given coordinates in the Cartesian communicator
     // Determine the root process in the Cartesian communicator and stored in rootRank
-    // int rootRank, root_coords[NDIM] = {0, 0};
-    // MPI_Cart_rank(comm, root_coords, &rootRank);
+    int rootRank, root_coords[NDIM] = {0, 0};
+    MPI_Cart_rank(comm, root_coords, &rootRank);
 
     // Determine the Cartesian coordinates of the current process with Cartesian rank cart_rank
     // and store them in coords
@@ -215,9 +214,10 @@ int main(int argc, char *argv[]) {
     int n;
     vector<double> flatten_A, b;
     vector<vector<double>> A;
+    vector<double> x;
 
     // input stream
-    if (world_rank == 0) {
+    if (world_rank == rootRank) {
         if (argc != 4) { return 1; }
 
         ifstream mat_file(argv[1]);
