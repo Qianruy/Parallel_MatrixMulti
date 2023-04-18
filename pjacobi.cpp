@@ -203,8 +203,8 @@ int main(int argc, char *argv[]) {
 
     // Returns the rank of the process with the given coordinates in the Cartesian communicator
     // Determine the root process in the Cartesian communicator and stored in rootRank
-    // int rootRank, root_coords[NDIM] = {0, 0};
-    // MPI_Cart_rank(comm, root_coords, &rootRank);
+    int rootRank, root_coords[NDIM] = {0, 0};
+    MPI_Cart_rank(comm, root_coords, &rootRank);
 
     // Determine the Cartesian coordinates of the current process with Cartesian rank cart_rank
     // and store them in coords
@@ -217,7 +217,7 @@ int main(int argc, char *argv[]) {
     vector<double> x;
 
     // input stream
-    if (world_rank == 0) {
+    if (world_rank == rootRank) {
         if (argc != 4) { return 1; }
 
         ifstream mat_file(argv[1]);
