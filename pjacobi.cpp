@@ -289,16 +289,11 @@ void gatherToRoot(int n, vector<double> &pro_vec, vector<double> &result_vec, MP
             rcounts[i] = block_division(n, mesh_size, i);
             displs[i] = (i == 0) ? 0 : displs[i - 1] + rcounts[i - 1];
         }
-
-        cout << "debug1: " << coords[0] << ", " << coords[1] << endl;
         MPI_Gatherv(&pro_vec[0], subsize_row, MPI_DOUBLE, &result_vec[0], rcounts, displs, MPI_DOUBLE, 0, comm_col);
-        cout << "debug2: " << coords[0] << ", " << coords[1] << endl;
     }
     MPI_Comm_free(&comm_col);
     return;
 }
-
-
 
 int main(int argc, char *argv[]) {
     MPI_Status status;
@@ -415,19 +410,16 @@ int main(int argc, char *argv[]) {
     int remain_dims[NDIM] = {true, false};
     MPI_Comm comm_col;
     MPI_Cart_sub(comm, remain_dims, &comm_col);
+
+    // Create a new communicator that represents a row of processes 
+    remain_dims[0] = false; 
+    remain_dims[1] = true;
+    MPI_Comm comm_row;
+    MPI_Cart_sub(comm, remain_dims, &comm_row);
     
     // Begin Iteration
-    while (ssd > THRESHOLD && iter_num < MAXITER) {
-        // Update x:
-        // Calculte local Rx 
-        local_res = mat_vect_mult(n, local_R, local_x, comm);
-        // Calculate local D^(-1)(b - Rx)
-        if (coords[1] == 0) {
-            for (int i = 0; i < local_b.size(); i++) {
-                local_x[i] = (local_b[i] - local_res[i]) / local_d[i];
-            }
-        }
-        MPI_Barrier(comm);
+    while (sqrt(ssd) > THRESHOLD && iter_num < MAXITER) {
+        
         // Compute termination criteria:
         // Calculate the sum of square diff locally
         local_b_hat = mat_vect_mult(n, local_A, local_x, comm);
@@ -441,11 +433,20 @@ int main(int argc, char *argv[]) {
         // Perform parallel reduction along the first column
         if (coords[1] == 0) {
             MPI_Allreduce(&local_ssd, &ssd, 1, MPI_DOUBLE, MPI_SUM, comm_col);
+        } 
+        // broadcast ssd in the first column along each row
+        MPI_Bcast(&ssd, 1, MPI_DOUBLE, 0, comm_row);
+        if (sqrt(ssd) <= THRESHOLD) { break; }
+        // Update x:
+        // Calculte local Rx 
+        local_res = mat_vect_mult(n, local_R, local_x, comm);
+        // Calculate local D^(-1)(b - Rx)
+        if (coords[1] == 0) {
+            for (int i = 0; i < local_b.size(); i++) {
+                local_x[i] = (local_b[i] - local_res[i]) / local_d[i];
+            }
         }
-        if (world_rank == rootRank) {
-            cout << iter_num << endl;
-            cout << ssd << endl;
-        }
+        MPI_Barrier(comm);
         iter_num++;
     }
     #ifdef DEBUG
@@ -475,7 +476,15 @@ int main(int argc, char *argv[]) {
             cout<<endl;
         }
     #endif
-
+    if (world_rank == 0) {
+        ofstream myfile;
+        myfile.open(argv[3]);
+        for (int i = 0; i < x_final.size(); i++) {
+            myfile << setprecision(16) << x_final[i] << " ";
+        }
+        myfile << endl;
+        myfile.close();
+    }
     // Finalize the MPI environment. No more MPI calls can be made after this
     MPI_Comm_free(&comm);
     MPI_Finalize();

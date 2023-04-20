@@ -1,5 +1,5 @@
 CXX = mpicxx
-CXXFLAGS = -std=c++17 -g
+CXXFLAGS = -std=c++17 -O2
 
 ifdef DEBUG
 CXXFLAGS += -DDEBUG
@@ -10,7 +10,3 @@ pjacobi: pjacobi.cpp
 
 clean:
 	rm -f pjacobi
-
-
-
-
