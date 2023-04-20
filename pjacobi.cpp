@@ -387,6 +387,10 @@ int main(int argc, char *argv[]) {
 
     MPI_Bcast(&n, 1, MPI_INT, rootRank, comm);
 
+    // Use MPI_Wtime to time the run-time of the program
+    double start;
+    if (world_rank == 0) {start = MPI_Wtime();}
+
     // Prepare for Jacobia Iteration
     vector<vector<double>> local_A = distribute_matrix(n, flatten_A, comm);
     vector<vector<double>> local_R = distribute_matrix(n, flatten_R, comm);
@@ -477,6 +481,15 @@ int main(int argc, char *argv[]) {
             cout<<endl;
         }
     #endif
+    double totaltime;
+    if (world_rank == 0) {
+        totaltime = MPI_Wtime() - start;
+        ofstream myfile;
+        myfile.open("time.txt", ios_base::app);
+        myfile << setprecision(6) << totaltime * 1000 << " ";
+        myfile << q * q << endl;
+    }  
+
     if (world_rank == 0) {
         ofstream myfile;
         myfile.open(argv[3]);
