@@ -8,6 +8,8 @@
 #include <cmath>
 
 #define NDIM 2
+#define MAXITER 1E6
+#define THRESHOLD 10E-9
 
 using namespace std;
 
@@ -42,7 +44,7 @@ vector<double> distribute_vect(int n, vector<double> &ori_vect, MPI_Comm comm) {
     MPI_Cart_sub(comm, remain_dims, &comm_col);
 
     int mesh_size = (int) sqrt(size);
-    // Division based on column coordinate
+    // Division based on row coordinate
     int subsize = block_division(n, mesh_size, coords[0]); 
 
     // Deal with the first column
@@ -106,11 +108,6 @@ vector<vector<double>> distribute_matrix(int n, vector<double> &ori_matrix, MPI_
         MPI_Scatterv(&ori_matrix[0], scounts, displs, MPI_DOUBLE, &transfer_data[0], 
             scounts[coords[0]], MPI_DOUBLE, 0, comm_col);
         MPI_Barrier(comm_col);
-        // #ifdef DEBUG
-        //     for (int i = 0; i < scounts[coords[0]]; i++)
-        //         cout << transfer_data[i] << " ";
-        //     cout << endl;
-        // #endif 
     }
 
     // Step 2: distribute the blocks in the first processor of each row 
@@ -146,7 +143,6 @@ vector<vector<double>> distribute_matrix(int n, vector<double> &ori_matrix, MPI_
 
     return local_matrix;
 }
-
 
 // transpose vector x
 void transpose_vect(int n, vector<double> &x, vector<double> &result, MPI_Comm comm) {
@@ -257,9 +253,7 @@ vector<double> mat_vect_mult(int n, vector<vector<double>> &A, vector<double> &x
     MPI_Reduce(&local_result[0], &result[0], colLen, MPI_DOUBLE, MPI_SUM, 0, comm_row);
 
     // set processor not in first column as empty
-    if (coords[1] != 0) {
-        result.resize(0);
-    }
+    if (coords[1] != 0) { result.clear(); }
 
     MPI_Comm_free(&comm_row);
     MPI_Comm_free(&comm_col);
@@ -267,44 +261,44 @@ vector<double> mat_vect_mult(int n, vector<vector<double>> &A, vector<double> &x
     return result;
 }
 
+// Gather local vectors in (i, 0) to the processor (0, 0)
+void gatherToRoot(int n, vector<double> &pro_vec, vector<double> &result_vec, MPI_Comm comm) {
+    int rank, size;
+    int coords[NDIM];
 
-// gather local vectors in (i, 0) to the processor (0, 0)
-void gatherToRoot(int n, vector<double> &pro_vec, vector<double> &result_vec, MPI_Comm comm_2d) {
-    int rank_2d, coor_2d[2];
     // Get grid info in 2D meesh
-    MPI_Comm_rank(comm_2d, &rank_2d);
-    MPI_Cart_coords(comm_2d, rank_2d, 2, &coor_2d[0]);
+    MPI_Comm_rank(comm, &rank);
+    MPI_Comm_size(comm, &size);
+    MPI_Cart_coords(comm, rank, NDIM, &coords[0]);
 
-    // Get p and q, and subsize
-    int p;
-    MPI_Comm_size(comm_2d, &p);
-    int q = (int)sqrt(p);
-    int subSize  = block_division(n, q, coor_2d[0]);
+   
+    int mesh_size = (int)sqrt(size);
+    int subsize_row  = block_division(n, mesh_size, coords[0]);
 
     // Create Column communicator
     int remain_dims[NDIM] = {true, false};
     MPI_Comm comm_col;
-    MPI_Cart_sub(comm_2d, remain_dims, &comm_col);
+    MPI_Cart_sub(comm, remain_dims, &comm_col);
 
     // Perform GatherV: all the elements are only on the 1st column
-    if (coor_2d[1] == 0) 
-    {
+    if (coords[1] == 0) {
         //Prepare parameters
-        int* rcounts = new int[q];
-        int* displs = new int[q];
-        displs[0] = 0;
-        for (int i = 0; i < q ; i++) {
-            rcounts[i] = block_division(n, q, i);
-            if (i > 0) {displs[i] = displs[i - 1] + rcounts[i - 1];}
+        int* rcounts = new int[mesh_size];
+        int* displs = new int[mesh_size];
+        for (int i = 0; i < mesh_size ; i++) {
+            rcounts[i] = block_division(n, mesh_size, i);
+            displs[i] = (i == 0) ? 0 : displs[i - 1] + rcounts[i - 1];
         }
-        MPI_Gatherv(&pro_vec[0],subSize, MPI_DOUBLE, &result_vec[0], rcounts, displs, MPI_DOUBLE, 0, comm_col);
-        // free the memory
-        delete[] rcounts, displs;
-    }
 
+        cout << "debug1: " << coords[0] << ", " << coords[1] << endl;
+        MPI_Gatherv(&pro_vec[0], subsize_row, MPI_DOUBLE, &result_vec[0], rcounts, displs, MPI_DOUBLE, 0, comm_col);
+        cout << "debug2: " << coords[0] << ", " << coords[1] << endl;
+    }
     MPI_Comm_free(&comm_col);
     return;
 }
+
+
 
 int main(int argc, char *argv[]) {
     MPI_Status status;
@@ -344,9 +338,8 @@ int main(int argc, char *argv[]) {
     MPI_Cart_coords(comm, cart_rank, NDIM, coords);
 
     int n;
-    vector<double> flatten_A, b;
+    vector<double> flatten_A, flatten_R, b, d;
     vector<vector<double>> A;
-    vector<double> x;
 
     // input stream
     if (world_rank == rootRank) {
@@ -363,13 +356,17 @@ int main(int argc, char *argv[]) {
         // Read input_mat.txt
         mat_file >> n;
         A.resize(n);
+        d.resize(n);
         flatten_A.resize(n * n);
+        flatten_R.resize(n * n);
         for (int i = 0; i < n; i++) {
             A[i].resize(n);
             for (int j = 0; j < n; j++) {
                 mat_file >> A[i][j];
                 flatten_A[i * n + j] = A[i][j];
+                flatten_R[i * n + j] = A[i][j] * (1 - (i == j));
             }
+            d[i] = A[i][i];
         }
         // Read input_vec.txt
         b.resize(n);
@@ -392,56 +389,92 @@ int main(int argc, char *argv[]) {
         #endif
     }
 
-    MPI_Bcast(&n, 1, MPI_INT, 0, comm);
+    MPI_Bcast(&n, 1, MPI_INT, rootRank, comm);
 
+    // Prepare for Jacobia Iteration
+    vector<vector<double>> local_A = distribute_matrix(n, flatten_A, comm);
+    vector<vector<double>> local_R = distribute_matrix(n, flatten_R, comm);
     vector<double> local_b = distribute_vect(n, b, comm);
+    // Distribute the diagnal elements D along the first column of the grid
+    vector<double> local_d = distribute_vect(n, d, comm);
+    // Store intermediate results
+    vector<double> local_res, local_b_hat;
+    // Initiate x to [0, ..., 0]
+    vector<double> x;
+    if (world_rank == rootRank) { 
+        x.resize(n);
+        fill_n(x.begin(), n, 0); 
+    }
+    vector<double> local_x = distribute_vect(n, x, comm);
+    // Initiate termination criteria
+    double ssd = 1.0;
+    int iter_num = 0;
     MPI_Barrier(comm);
-    // #ifdef DEBUG
-    //     if (coords[1] == 0) {
-    //         cout << "world rank: " << world_rank << " dim0:" << coords[0] << " dim1:" << coords[1] << endl;
-    //         cout << "vector size: " << local_b.size() << endl;
-    //     }
-    // #endif
 
+    // Create Column communicator
+    int remain_dims[NDIM] = {true, false};
+    MPI_Comm comm_col;
+    MPI_Cart_sub(comm, remain_dims, &comm_col);
+    
+    // Begin Iteration
+    while (ssd > THRESHOLD && iter_num < MAXITER) {
+        // Update x:
+        // Calculte local Rx 
+        local_res = mat_vect_mult(n, local_R, local_x, comm);
+        // Calculate local D^(-1)(b - Rx)
+        if (coords[1] == 0) {
+            for (int i = 0; i < local_b.size(); i++) {
+                local_x[i] = (local_b[i] - local_res[i]) / local_d[i];
+            }
+        }
+        MPI_Barrier(comm);
+        // Compute termination criteria:
+        // Calculate the sum of square diff locally
+        local_b_hat = mat_vect_mult(n, local_A, local_x, comm);
+        double local_ssd = 0.0;
+        if (coords[1] == 0) {
+            for (int i = 0; i < local_b.size(); i++) {
+                local_ssd += (local_b_hat[i] - local_b[i]) * (local_b_hat[i] - local_b[i]);
+            }
+        }
+        MPI_Barrier(comm);
+        // Perform parallel reduction along the first column
+        if (coords[1] == 0) {
+            MPI_Allreduce(&local_ssd, &ssd, 1, MPI_DOUBLE, MPI_SUM, comm_col);
+        }
+        if (world_rank == rootRank) {
+            cout << iter_num << endl;
+            cout << ssd << endl;
+        }
+        iter_num++;
+    }
     #ifdef DEBUG
         if (coords[1] == 0) {
-            cout << "local B" << endl;
-            for (int i = 0; i < local_b.size(); i++)
-                cout << local_b[i] << " ";
-            cout << endl;
-        }
-    #endif
-
-    vector<vector<double>> local_A = distribute_matrix(n, flatten_A, comm);
-    // #ifdef DEBUG
-    //     cout << "local A" << endl;
-    //     for (int i = 0; i < local_A.size(); i++)
-    //         for (int j = 0; j < local_A[0].size(); j++)
-    //             cout << local_A[i][j] << " ";
-    //         cout << endl;
-    // #endif
-
-    vector<double> test_mult = mat_vect_mult(n, local_A, local_b, comm);
-
-    #ifdef DEBUG
-    if (coords[1] == 0) {
-            cout << "Test Mult Size: " << test_mult.size() << endl;
-            for (int i = 0; i < test_mult.size(); i++){
-                cout << test_mult[i] << " ";
+            cout << "Final result: " << endl;
+            for (int i = 0; i < local_x.size(); i++){
+                cout << local_x[i] << " ";
             }
             cout<<endl;
-    }
+        }
     #endif
+    MPI_Comm_free(&comm_col);
 
-    // Gatehr vector results to processor 0: 
-    // if (world_rank == 0)
-    //      x = std::vector<double>(n);
-    // int sizeX = block_division(n, q,coords[0]);
-    // vector<double> curr_x(sizeX, 0.0);
+    vector<double> x_final;
+    // Gatehr vector results to root processor 
+    if (world_rank == 0) {
+        x_final.resize(n);
+    }
     
-    // gatherToRoot(n, curr_x, x, comm);
-
-
+    gatherToRoot(n, local_x, x_final, comm);
+    #ifdef DEBUG
+        if (coords[0] == 0 && coords[1] == 0) {
+            cout << "Final result: " << endl;
+            for (int i = 0; i < x_final.size(); i++){
+                cout << x_final[i] << " ";
+            }
+            cout<<endl;
+        }
+    #endif
 
     // Finalize the MPI environment. No more MPI calls can be made after this
     MPI_Comm_free(&comm);
