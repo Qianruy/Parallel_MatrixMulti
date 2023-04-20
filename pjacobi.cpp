@@ -6,10 +6,11 @@
 #include <string>
 #include <vector>
 #include <cmath>
+#include <iomanip>
 
 #define NDIM 2
 #define MAXITER 1E6
-#define THRESHOLD 10E-9
+#define THRESHOLD 1E-9
 
 using namespace std;
 
