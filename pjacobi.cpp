@@ -237,25 +237,26 @@ vector<double> mat_vect_mult(int n, vector<vector<double>> &A, vector<double> &x
     // local row and column length for current process
     int rowLen = block_division(n, comm_row);
     int colLen = block_division(n, comm_col);
-
-    vector<double> local_row(rowLen);
+    
+    vector<double> local_row(colLen);
     transpose_vect(n, x, local_row, comm);
-
-    vector<double> local_result(colLen);
-
-    for (int i = 0; i < colLen; i++) {
-        for (int j = 0; j < rowLen; j++) {
+    
+    vector<double> local_result(rowLen);
+    
+    for (int i = 0; i < rowLen; i++) {
+        for (int j = 0; j < colLen; j++) {
             local_result[i] += local_row[j] * A[i][j];
         }
     }
 
     // Reduction: sum up local results to the first column
-    result.resize(colLen);
-    MPI_Reduce(&local_result[0], &result[0], colLen, MPI_DOUBLE, MPI_SUM, 0, comm_row);
-
+    result.resize(rowLen);
+    MPI_Reduce(&local_result[0], &result[0], rowLen, MPI_DOUBLE, MPI_SUM, 0, comm_row);
+    
     // set processor not in first column as empty
     if (coords[1] != 0) { result.clear(); }
 
+    
     MPI_Comm_free(&comm_row);
     MPI_Comm_free(&comm_col);
 
@@ -390,7 +391,7 @@ int main(int argc, char *argv[]) {
     // Use MPI_Wtime to time the run-time of the program
     double start;
     if (world_rank == 0) {start = MPI_Wtime();}
-
+    
     // Prepare for Jacobia Iteration
     vector<vector<double>> local_A = distribute_matrix(n, flatten_A, comm);
     vector<vector<double>> local_R = distribute_matrix(n, flatten_R, comm);
@@ -410,7 +411,7 @@ int main(int argc, char *argv[]) {
     double ssd = 1.0;
     int iter_num = 0;
     MPI_Barrier(comm);
-
+    
     // Create Column communicator
     int remain_dims[NDIM] = {true, false};
     MPI_Comm comm_col;
@@ -427,7 +428,9 @@ int main(int argc, char *argv[]) {
         
         // Compute termination criteria:
         // Calculate the sum of square diff locally
+        
         local_b_hat = mat_vect_mult(n, local_A, local_x, comm);
+
         double local_ssd = 0.0;
         if (coords[1] == 0) {
             for (int i = 0; i < local_b.size(); i++) {
@@ -435,6 +438,7 @@ int main(int argc, char *argv[]) {
             }
         }
         MPI_Barrier(comm);
+    
         // Perform parallel reduction along the first column
         if (coords[1] == 0) {
             MPI_Allreduce(&local_ssd, &ssd, 1, MPI_DOUBLE, MPI_SUM, comm_col);
