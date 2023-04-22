@@ -66,10 +66,10 @@ vector<double> distribute_vect(int n, vector<double> &ori_vect, MPI_Comm comm) {
 
         MPI_Scatterv(&ori_vect[0], scounts, displs, MPI_DOUBLE, &local_vec[0], 
             subsize, MPI_DOUBLE, 0, comm_col);
+        MPI_Barrier(comm_col);
     }
-
+    
     MPI_Comm_free(&comm_col);
-
     return local_vec;
 }
 
@@ -120,8 +120,8 @@ vector<vector<double>> distribute_matrix(int n, vector<double> &ori_matrix, MPI_
     MPI_Cart_sub(comm, remain_dims, &comm_row);
 
     // Division based on row and column coordinate
-    int subsize_row = block_division(n, mesh_size, coords[1]); 
-    int subsize_col = block_division(n, mesh_size, coords[0]); 
+    int subsize_row = block_division(n, mesh_size, coords[0]); 
+    int subsize_col = block_division(n, mesh_size, coords[1]); 
     int subsize = subsize_row * subsize_col;
 
     // Prepare arguments for Scatterv
@@ -141,7 +141,8 @@ vector<vector<double>> distribute_matrix(int n, vector<double> &ori_matrix, MPI_
     }
 
     MPI_Barrier(comm_row);
-
+    MPI_Comm_free(&comm_col);
+    MPI_Comm_free(&comm_row);
     return local_matrix;
 }
 
@@ -238,24 +239,25 @@ vector<double> mat_vect_mult(int n, vector<vector<double>> &A, vector<double> &x
     int rowLen = block_division(n, comm_row);
     int colLen = block_division(n, comm_col);
     
-    vector<double> local_row(colLen);
+    vector<double> local_row(rowLen);
     transpose_vect(n, x, local_row, comm);
     
-    vector<double> local_result(rowLen);
+    vector<double> local_result(colLen);
     
-    for (int i = 0; i < rowLen; i++) {
-        for (int j = 0; j < colLen; j++) {
+    for (int i = 0; i < colLen; i++) {
+        for (int j = 0; j < rowLen; j++) {
             local_result[i] += local_row[j] * A[i][j];
         }
     }
 
     // Reduction: sum up local results to the first column
-    result.resize(rowLen);
-    MPI_Reduce(&local_result[0], &result[0], rowLen, MPI_DOUBLE, MPI_SUM, 0, comm_row);
+    result.resize(colLen);
+    
+    MPI_Reduce(&local_result[0], &result[0], colLen, MPI_DOUBLE, MPI_SUM, 0, comm_row);
     
     // set processor not in first column as empty
     if (coords[1] != 0) { result.clear(); }
-
+    MPI_Barrier(comm_row);
     
     MPI_Comm_free(&comm_row);
     MPI_Comm_free(&comm_col);
