@@ -390,9 +390,7 @@ int main(int argc, char *argv[]) {
 
     MPI_Bcast(&n, 1, MPI_INT, rootRank, comm);
 
-    // Use MPI_Wtime to time the run-time of the program
-    double start;
-    if (world_rank == 0) {start = MPI_Wtime();}
+    
     
     // Prepare for Jacobia Iteration
     vector<vector<double>> local_A = distribute_matrix(n, flatten_A, comm);
@@ -410,7 +408,8 @@ int main(int argc, char *argv[]) {
     }
     vector<double> local_x = distribute_vect(n, x, comm);
     // Initiate termination criteria
-    double ssd = 1.0;
+    long double ssd = 1.0;
+    long double prev_ssd = 2.0;
     int iter_num = 0;
     MPI_Barrier(comm);
     
@@ -424,6 +423,10 @@ int main(int argc, char *argv[]) {
     remain_dims[1] = true;
     MPI_Comm comm_row;
     MPI_Cart_sub(comm, remain_dims, &comm_row);
+
+    // Use MPI_Wtime to time the run-time of the program
+    double start;
+    if (world_rank == 0) {start = MPI_Wtime();}
     
     // Begin Iteration
     while (sqrt(ssd) > THRESHOLD && iter_num < MAXITER) {
@@ -433,7 +436,7 @@ int main(int argc, char *argv[]) {
         
         local_b_hat = mat_vect_mult(n, local_A, local_x, comm);
 
-        double local_ssd = 0.0;
+        long double local_ssd = 0.0;
         if (coords[1] == 0) {
             for (int i = 0; i < local_b.size(); i++) {
                 local_ssd += (local_b_hat[i] - local_b[i]) * (local_b_hat[i] - local_b[i]);
@@ -443,11 +446,12 @@ int main(int argc, char *argv[]) {
     
         // Perform parallel reduction along the first column
         if (coords[1] == 0) {
-            MPI_Allreduce(&local_ssd, &ssd, 1, MPI_DOUBLE, MPI_SUM, comm_col);
+            MPI_Allreduce(&local_ssd, &ssd, 1, MPI_LONG_DOUBLE, MPI_SUM, comm_col);
         } 
         // broadcast ssd in the first column along each row
         MPI_Bcast(&ssd, 1, MPI_DOUBLE, 0, comm_row);
-        if (sqrt(ssd) <= THRESHOLD) { break; }
+        if (sqrt(ssd) <= THRESHOLD || abs(prev_ssd - ssd) < THRESHOLD * prev_ssd) { break; }
+        prev_ssd = ssd;
         // Update x:
         // Calculte local Rx 
         local_res = mat_vect_mult(n, local_R, local_x, comm);
@@ -460,6 +464,7 @@ int main(int argc, char *argv[]) {
         MPI_Barrier(comm);
         iter_num++;
     }
+    cout << iter_num << endl;
     #ifdef DEBUG
         if (coords[1] == 0) {
             cout << "Final result: " << endl;
