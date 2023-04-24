@@ -407,9 +407,6 @@ int main(int argc, char *argv[]) {
         fill_n(x.begin(), n, 0); 
     }
     vector<double> local_x = distribute_vect(n, x, comm);
-    // Initiate termination criteria
-    long double ssd = 1.0;
-    int iter_num = 0;
     MPI_Barrier(comm);
     // Use MPI_WTIME to time the run-time of the program
     // Start after finishing distribution process - required in pa3.pdf
