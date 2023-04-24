@@ -1,8 +1,8 @@
 #!/bin/bash
 #PBS -N PA03
-#PBS -l nodes=8:ppn=16
+#PBS -l nodes=8:ppn=12
 #PBS -l pmem=2048mb
-#PBS -l walltime=00:30:00
+#PBS -l walltime=01:00:00
 #PBS -q coc-ice-multi
 #PBS -oe result.out
 
@@ -16,6 +16,6 @@ module load anaconda3
 make clean
 make
 
-for p in {1..16..1}; do
+for p in {1..11..1}; do
     python3 performance_test.py ${p}
 done
