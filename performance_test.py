@@ -12,10 +12,12 @@ try:
     q = int(sys.argv[1])
 except: pass
 
-n = 30
+n = 100
 # define matrix A and vector b
 # A = np.random.uniform(0, MAX, (n, n))
 # x = np.random.uniform(0, MAX, n)
+# y = np.random.uniform(0, MAX, n)
+# A = np.diag(y)
 
 # for i in range(len(A)):
 #     diagnal = A[i][i] 

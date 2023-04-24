@@ -389,8 +389,6 @@ int main(int argc, char *argv[]) {
     }
 
     MPI_Bcast(&n, 1, MPI_INT, rootRank, comm);
-
-    
     
     // Prepare for Jacobia Iteration
     vector<vector<double>> local_A = distribute_matrix(n, flatten_A, comm);
@@ -407,14 +405,16 @@ int main(int argc, char *argv[]) {
         fill_n(x.begin(), n, 0); 
     }
     vector<double> local_x = distribute_vect(n, x, comm);
-    MPI_Barrier(comm);
-    // Use MPI_WTIME to time the run-time of the program
+
+    // Use MPI_Wtime to time the run-time of the program
     // Start after finishing distribution process - required in pa3.pdf
     double start;
     if (world_rank == 0) {start = MPI_Wtime();}
+
     // Initiate termination criteria
     double ssd = 1.0;
     int iter_num = 0;
+    
     // Create Column communicator
     int remain_dims[NDIM] = {true, false};
     MPI_Comm comm_col;
@@ -425,11 +425,9 @@ int main(int argc, char *argv[]) {
     remain_dims[1] = true;
     MPI_Comm comm_row;
     MPI_Cart_sub(comm, remain_dims, &comm_row);
-
     
     // Begin Iteration
     while (iter_num < MAXITER) {
-        
         // Compute termination criteria:
         // Calculate the sum of square diff locally
         
@@ -445,14 +443,13 @@ int main(int argc, char *argv[]) {
     
         // Perform parallel reduction along the first column
         if (coords[1] == 0) {
-            MPI_Allreduce(&local_ssd, &ssd, 1, MPI_LONG_DOUBLE, MPI_SUM, comm_col);
+            MPI_Allreduce(&local_ssd, &ssd, 1, MPI_DOUBLE, MPI_SUM, comm_col);
         } 
         // broadcast ssd in the first column along each row
         MPI_Bcast(&ssd, 1, MPI_DOUBLE, 0, comm_row);
 
         // Calculate 2-norm to determine if terminate iteration
         if (sqrt(ssd) <= THRESHOLD) { break; }
-        
         // Update x:
         // Calculte local Rx 
         local_res = mat_vect_mult(n, local_R, local_x, comm);
@@ -465,7 +462,6 @@ int main(int argc, char *argv[]) {
         MPI_Barrier(comm);
         iter_num++;
     }
-    //cout << iter_num << endl;
     #ifdef DEBUG
         if (coords[1] == 0) {
             cout << "Final result: " << endl;
@@ -493,6 +489,7 @@ int main(int argc, char *argv[]) {
             cout<<endl;
         }
     #endif
+
     // Counting Runtime - for analysis
     // Stop before writing process - required in pa3.pdf
     double totaltime;
@@ -500,10 +497,11 @@ int main(int argc, char *argv[]) {
         totaltime = MPI_Wtime() - start;
         // Following 4 lines would write runtime to a txt file, which is not asked as a output in pa3.pdf
         // Please uncomment these 4 lines, if you wanna record the runtime to the file.
-        //ofstream myfile;
-        //myfile.open("time.txt", ios_base::app);
-        //myfile << setprecision(6) << totaltime * 1000 << " ";
-        //myfile << q * q << endl;
+        ofstream myfile;
+        myfile.open("time.txt", ios_base::app);
+        myfile << setprecision(6) << iter_num << " ";
+        myfile << setprecision(6) << totaltime * 1000 << " ";
+        myfile << q * q << endl;
     }  
 
     if (world_rank == 0) {
